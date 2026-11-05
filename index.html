@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LED Pattern Designer & CLI Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #121212; color: #eee; margin: 0; padding: 20px; text-align: center; }
+    h1 { color: #90caf9; margin-bottom: 5px; }
+    p { color: #aaa; margin-bottom: 25px; }
+    .card { background: #1e1e1e; padding: 20px; border-radius: 12px; max-width: 800px; margin: 0 auto 20px auto; box-shadow: 0 4px 10px rgba(0,0,0,0.5); text-align: left; }
+    h2 { color: #90caf9; font-size: 18px; margin-top: 0; }
+    .palette { display: flex; gap: 8px; flex-wrap: wrap; margin: 15px 0; justify-content: center; }
+    .swatch { width: 36px; height: 36px; border-radius: 50%; cursor: pointer; border: 3px solid #444; transition: 0.15s; }
+    .swatch.active { border-color: #ffeb3b; transform: scale(1.15); }
+    #gridCanvas { width: 100%; height: 60px; background: #000; display: flex; margin: 15px 0; border-radius: 6px; overflow: hidden; cursor: crosshair; user-select: none; border: 1px solid #444; }
+    .pixel { flex: 1; height: 100%; border-right: 1px solid rgba(255,255,255,0.03); }
+    .controls { display: flex; gap: 10px; justify-content: center; margin-top: 15px; }
+    button { padding: 10px 20px; font-size: 15px; font-weight: bold; background: #1976d2; color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+    button:hover { background: #115293; }
+    .undo-btn { background: #d32f2f; }
+    .undo-btn:hover { background: #9a0007; }
+    .clear-btn { background: #616161; }
+    .clear-btn:hover { background: #424242; }
+    .output-box { background: #111; padding: 15px; border-radius: 6px; border: 1px solid #333; font-family: monospace; font-size: 16px; color: #69f0ae; word-break: break-all; margin-top: 10px; text-align: center; }
+    .copy-hint { font-size: 12px; color: #888; margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+  <h1>LED Pattern Designer</h1>
+  <p>Design the pattern here. Note that you don't have you paint the entire strip. Just complete a segment of your pattern and it will be coppied throughout the strip</p>
+
+  <div class="card">
+    <h2>1. Select Color Swatch</h2>
+    <div class="palette" id="paletteContainer"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Paint Strip (115 LEDs)</h2>
+    <div id="gridCanvas"></div>
+    <div class="controls">
+      <button class="undo-btn" onclick="undoPaint()">Oops (Undo)</button>
+      <button class="clear-btn" onclick="clearAll('w')">Fill All White</button>
+      <button class="clear-btn" onclick="clearAll('x')">Clear All (Black)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. Generated Shorthand Command</h2>
+    <div class="output-box" id="outputCode">0 yorbw...</div>Paste
+    <div class="copy-hint"> Copy and add to <a href="https://docs.google.com/document/d/1-UBprw-wmovMeCIGQHMr-zY3Tul_udzG1J20thlEI_8/edit?usp=sharing" target="_blank">this document</a></div>
+    <div style="text-align: center; margin-top: 15px;">
+      <button onclick="copyCommand()">Copy Command to Clipboard</button>
+    </div>
+  </div>
+
+  <script>
+    const colors = {
+      r: '#ff0000', o: '#ffa500', y: '#ffff00', g: '#008000', 
+      l: '#00ff00', b: '#0000ff', s: '#00bfff', c: '#00ffff', 
+      t: '#008b8b', m: '#ff00ff', i: '#ff1493', p: '#800080', 
+      w: '#ffffff', x: '#000000'
+    };
+
+    let currentColor = 'r';
+    let currentData = 'x'.repeat(115);
+    let strokeUndoBuffer = null;
+    let isMouseDown = false;
+
+    // Build palette swatches
+    const palContainer = document.getElementById('paletteContainer');
+    for (let key in colors) {
+      let div = document.createElement('div');
+      div.className = 'swatch' + (key === currentColor ? ' active' : '');
+      div.style.background = colors[key];
+      div.onclick = () => {
+        document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+        div.classList.add('active');
+        currentColor = key;
+      };
+      palContainer.appendChild(div);
+    }
+
+    // Build paint canvas
+    const gridCanvas = document.getElementById('gridCanvas');
+    for (let i = 0; i < 115; i++) {
+      let px = document.createElement('div');
+      px.className = 'pixel';
+      px.dataset.index = i;
+      
+      px.onmousedown = (e) => {
+        isMouseDown = true;
+        strokeUndoBuffer = currentData;
+        paintPixel(i);
+      };
+      px.onmouseover = (e) => {
+        if (isMouseDown) paintPixel(i);
+      };
+      gridCanvas.appendChild(px);
+    }
+
+    window.onmouseup = () => { isMouseDown = false; };
+
+    function paintPixel(i) {
+      if (currentData[i] === currentColor) return;
+      currentData = currentData.substring(0, i) + currentColor + currentData.substring(i + 1);
+      renderCanvasPixels();
+      updateOutput();
+    }
+
+    function undoPaint() {
+      if (strokeUndoBuffer !== null) {
+        currentData = strokeUndoBuffer;
+        renderCanvasPixels();
+        updateOutput();
+      } else {
+        alert("No recent stroke to undo.");
+      }
+    }
+
+    function clearAll(char) {
+      strokeUndoBuffer = currentData;
+      currentData = char.repeat(115);
+      renderCanvasPixels();
+      updateOutput();
+    }
+
+    function renderCanvasPixels() {
+      let pixels = gridCanvas.children;
+      for (let i = 0; i < 115; i++) {
+        let char = currentData[i] || 'x';
+        pixels[i].style.background = colors[char] || '#000';
+      }
+    }
+
+    function updateOutput() {
+      // Generates the clean CLI sequence command: "0 [115-char string]"
+      let cmd = "0 " + currentData;
+      document.getElementById('outputCode').innerText = cmd;
+    }
+
+    function copyCommand() {
+      let text = document.getElementById('outputCode').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        alert("Command copied to clipboard!");
+      });
+    }
+
+    // Initial render
+    renderCanvasPixels();
+    updateOutput();
+  </script>
+
+</body>
+</html>

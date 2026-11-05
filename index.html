@@ -2,34 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>LED Pattern Designer & CLI Generator</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #121212; color: #eee; margin: 0; padding: 20px; text-align: center; }
+    body { font-family: Arial, sans-serif; background: #121212; color: #eee; margin: 0; padding: 20px; text-align: center; touch-action: manipulation; }
     h1 { color: #90caf9; margin-bottom: 5px; }
     p { color: #aaa; margin-bottom: 25px; }
     .card { background: #1e1e1e; padding: 20px; border-radius: 12px; max-width: 800px; margin: 0 auto 20px auto; box-shadow: 0 4px 10px rgba(0,0,0,0.5); text-align: left; }
     h2 { color: #90caf9; font-size: 18px; margin-top: 0; }
     .palette { display: flex; gap: 8px; flex-wrap: wrap; margin: 15px 0; justify-content: center; }
-    .swatch { width: 36px; height: 36px; border-radius: 50%; cursor: pointer; border: 3px solid #444; transition: 0.15s; }
+    .swatch { width: 40px; height: 40px; border-radius: 50%; cursor: pointer; border: 3px solid #444; transition: 0.15s; }
     .swatch.active { border-color: #ffeb3b; transform: scale(1.15); }
-    #gridCanvas { width: 100%; height: 60px; background: #000; display: flex; margin: 15px 0; border-radius: 6px; overflow: hidden; cursor: crosshair; user-select: none; border: 1px solid #444; }
-    .pixel { flex: 1; height: 100%; border-right: 1px solid rgba(255,255,255,0.03); }
-    .controls { display: flex; gap: 10px; justify-content: center; margin-top: 15px; }
-    button { padding: 10px 20px; font-size: 15px; font-weight: bold; background: #1976d2; color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+    .canvas-container { width: 100%; overflow-x: auto; background: #000; border-radius: 6px; border: 1px solid #444; margin: 15px 0; }
+    #paintCanvas { display: block; width: 100%; height: 70px; cursor: crosshair; touch-action: none; }
+    .controls { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
+    button { padding: 12px 20px; font-size: 15px; font-weight: bold; background: #1976d2; color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
     button:hover { background: #115293; }
     .undo-btn { background: #d32f2f; }
     .undo-btn:hover { background: #9a0007; }
     .clear-btn { background: #616161; }
     .clear-btn:hover { background: #424242; }
     .output-box { background: #111; padding: 15px; border-radius: 6px; border: 1px solid #333; font-family: monospace; font-size: 16px; color: #69f0ae; word-break: break-all; margin-top: 10px; text-align: center; }
-    .copy-hint { font-size: 12px; color: #888; margin-top: 5px; }
+    .copy-hint { font-size: 13px; color: #aaa; margin-top: 8px; text-align: center; }
+    .copy-hint a { color: #90caf9; text-decoration: underline; }
   </style>
 </head>
 <body>
 
   <h1>LED Pattern Designer</h1>
-  <p>Design the pattern here. Note that you don't have you paint the entire strip. Just complete a segment of your pattern and it will be coppied throughout the strip</p>
+  <p>Design the pattern here. Just complete a segment of your pattern and it will be copied throughout the strip.</p>
 
   <div class="card">
     <h2>1. Select Color Swatch</h2>
@@ -38,7 +39,9 @@
 
   <div class="card">
     <h2>2. Paint Strip (115 LEDs)</h2>
-    <div id="gridCanvas"></div>
+    <div class="canvas-container">
+      <canvas id="paintCanvas"></canvas>
+    </div>
     <div class="controls">
       <button class="undo-btn" onclick="undoPaint()">Oops (Undo)</button>
       <button class="clear-btn" onclick="clearAll('w')">Fill All White</button>
@@ -48,8 +51,8 @@
 
   <div class="card">
     <h2>3. Generated Shorthand Command</h2>
-    <div class="output-box" id="outputCode">0 yorbw...</div>Paste
-    <div class="copy-hint"> Copy and add to <a href="https://docs.google.com/document/d/1-UBprw-wmovMeCIGQHMr-zY3Tul_udzG1J20thlEI_8/edit?usp=sharing" target="_blank">this document</a></div>
+    <div class="output-box" id="outputCode">0 yorbw...</div>
+    <div class="copy-hint">Copy and add to <a href="https://docs.google.com/document/d/1-UBprw-wmovMeCIGQHMr-zY3Tul_udzG1J20thlEI_8/edit?usp=sharing" target="_blank">this document</a>.</div>
     <div style="text-align: center; margin-top: 15px;">
       <button onclick="copyCommand()">Copy Command to Clipboard</button>
     </div>
@@ -66,7 +69,7 @@
     let currentColor = 'r';
     let currentData = 'x'.repeat(115);
     let strokeUndoBuffer = null;
-    let isMouseDown = false;
+    let isDrawing = false;
 
     // Build palette swatches
     const palContainer = document.getElementById('paletteContainer');
@@ -82,37 +85,80 @@
       palContainer.appendChild(div);
     }
 
-    // Build paint canvas
-    const gridCanvas = document.getElementById('gridCanvas');
-    for (let i = 0; i < 115; i++) {
-      let px = document.createElement('div');
-      px.className = 'pixel';
-      px.dataset.index = i;
+    // Canvas Setup
+    const canvas = document.getElementById('paintCanvas');
+    const ctx = canvas.getContext('2d');
+    const numLeds = 115;
+
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = 70;
+      drawStrip();
+    }
+    window.onresize = resizeCanvas;
+    resizeCanvas();
+
+    function drawStrip() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let ledWidth = canvas.width / numLeds;
       
-      px.onmousedown = (e) => {
-        isMouseDown = true;
-        strokeUndoBuffer = currentData;
-        paintPixel(i);
-      };
-      px.onmouseover = (e) => {
-        if (isMouseDown) paintPixel(i);
-      };
-      gridCanvas.appendChild(px);
+      for (let i = 0; i < numLeds; i++) {
+        let char = currentData[i] || 'x';
+        ctx.fillStyle = colors[char] || '#000000';
+        ctx.fillRect(i * ledWidth, 0, ledWidth + 0.5, canvas.height); // +0.5 prevents thin black lines between LEDs
+        
+        // Subtle pixel separator line
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.strokeRect(i * ledWidth, 0, ledWidth, canvas.height);
+      }
     }
 
-    window.onmouseup = () => { isMouseDown = false; };
+    function getLedIndexFromEvent(e) {
+      let rect = canvas.getBoundingClientRect();
+      let clientX = e.clientX;
+      if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+      }
+      let x = clientX - rect.left;
+      let ledWidth = canvas.width / numLeds;
+      let index = Math.floor(x / ledWidth);
+      return Math.max(0, Math.min(numLeds - 1, index));
+    }
+
+    // Pointer events handle Mouse, Touch, and Apple Pencil perfectly on a canvas
+    canvas.addEventListener('pointerdown', (e) => {
+      isDrawing = true;
+      strokeUndoBuffer = currentData;
+      let idx = getLedIndexFromEvent(e);
+      paintPixel(idx);
+      e.preventDefault();
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isDrawing) return;
+      let rect = canvas.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        let idx = getLedIndexFromEvent(e);
+        paintPixel(idx);
+      }
+      e.preventDefault();
+    });
+
+    window.addEventListener('pointerup', () => {
+      isDrawing = false;
+    });
 
     function paintPixel(i) {
       if (currentData[i] === currentColor) return;
       currentData = currentData.substring(0, i) + currentColor + currentData.substring(i + 1);
-      renderCanvasPixels();
+      drawStrip();
       updateOutput();
     }
 
     function undoPaint() {
       if (strokeUndoBuffer !== null) {
         currentData = strokeUndoBuffer;
-        renderCanvasPixels();
+        drawStrip();
         updateOutput();
       } else {
         alert("No recent stroke to undo.");
@@ -122,20 +168,11 @@
     function clearAll(char) {
       strokeUndoBuffer = currentData;
       currentData = char.repeat(115);
-      renderCanvasPixels();
+      drawStrip();
       updateOutput();
     }
 
-    function renderCanvasPixels() {
-      let pixels = gridCanvas.children;
-      for (let i = 0; i < 115; i++) {
-        let char = currentData[i] || 'x';
-        pixels[i].style.background = colors[char] || '#000';
-      }
-    }
-
     function updateOutput() {
-      // Generates the clean CLI sequence command: "0 [115-char string]"
       let cmd = "0 " + currentData;
       document.getElementById('outputCode').innerText = cmd;
     }
@@ -147,8 +184,7 @@
       });
     }
 
-    // Initial render
-    renderCanvasPixels();
+    drawStrip();
     updateOutput();
   </script>
 
